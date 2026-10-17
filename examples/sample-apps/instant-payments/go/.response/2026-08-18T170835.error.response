@@ -1,0 +1,14 @@
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.oracle.truffle.api.dsl.InlineSupport$UnsafeField (file:/opt/homebrew/Caskroom/ijhttp/261.25134.95/ijhttp/lib/truffle-api-24.0.2.jar)
+WARNING: Please consider reporting this to the maintainers of class com.oracle.truffle.api.dsl.InlineSupport$UnsafeField
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+com.intellij.execution.ExecutionException: TypeError: Cannot read property 'collectionVariables' of undefined
+  :module:eval (at /Users/radugribincea/projects/aws/sample-apps/aws-dynamodb-examples/examples/sample-apps/instant-payments/go/.instant-payments-verification.ijhttp-current-request.86430.1787062113084.http:58)
+	at com.intellij.httpClient.http.request.run.js.graalvm.HttpClientGraalVmJsHandler.throwExecutionExceptionWithCorrectedInformation(HttpClientGraalVmJsHandler.kt:127)
+	at com.intellij.httpClient.http.request.run.js.graalvm.HttpClientGraalVmJsHandler.throwExecutionExceptionWithCorrectedInformation$default(HttpClientGraalVmJsHandler.kt:117)
+	at com.intellij.httpClient.http.request.run.js.graalvm.HttpClientGraalVmExecutor$execute$2$1.invokeSuspend(HttpClientGraalVmExecutor.kt:83)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1095)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:619)
+	at java.base/java.lang.Thread.run(Thread.java:1447)
