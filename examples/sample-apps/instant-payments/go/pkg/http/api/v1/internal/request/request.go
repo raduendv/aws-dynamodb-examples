@@ -9,8 +9,12 @@ import (
 	"instantpayments/pkg/service"
 )
 
+// maximumIdentifierLength bounds user-supplied path identifiers to the shared API contract.
+const maximumIdentifierLength = 64
+
+// ValidIdentifier checks the shared nonempty ASCII identifier shape and 64-character bound.
 func ValidIdentifier(value string) bool {
-	if len(value) == 0 || len(value) > 64 {
+	if len(value) == 0 || len(value) > maximumIdentifierLength {
 		return false
 	}
 	for _, character := range value {
@@ -21,6 +25,7 @@ func ValidIdentifier(value string) bool {
 	return true
 }
 
+// RequireMethod returns true for accepted verbs or writes a method-error envelope and Allow header.
 func RequireMethod(writer http.ResponseWriter, r *http.Request, acceptedMethods ...string) bool {
 	if slices.Contains(acceptedMethods, r.Method) {
 		return true

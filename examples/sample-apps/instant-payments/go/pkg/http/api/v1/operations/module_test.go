@@ -1,3 +1,4 @@
+// This suite checks payment-processing route module construction.
 package operations
 
 import (

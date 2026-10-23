@@ -1,3 +1,4 @@
+// This suite checks account-route Fx module construction.
 package accounts
 
 import (

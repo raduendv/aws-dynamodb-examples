@@ -1,20 +1,26 @@
-# default action for make is to run the application
-SHELL := /bin/zsh
-
+SHELL := /bin/sh
 PROJECT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-AWS_ENV_FILE ?= $(PROJECT_DIR).aws.env
-GO ?= $(HOME)/.gvm/gos/go1.26.0/bin/go
-AWS_REGION ?= us-east-1
 
-.PHONY: all
-all: run
+.PHONY: all build test coverage run dynamodb-start dynamodb-stop ijhttp
+all: build
 
-.PHONY: run
+build:
+	cd "$(PROJECT_DIR)" && scripts/build-app.sh
+
+test:
+	cd "$(PROJECT_DIR)" && scripts/run-tests.sh
+
+coverage:
+	cd "$(PROJECT_DIR)" && scripts/run-tests.sh --coverage
+
 run:
-	. "$(AWS_ENV_FILE)" && cd "$(PROJECT_DIR)" && aws dynamodb delete-table --table-name instant-payments-go --region $(AWS_REGION) >/dev/null 2>&1 || true
-	. "$(AWS_ENV_FILE)" && cd "$(PROJECT_DIR)" && aws dynamodb wait table-not-exists --table-name instant-payments-go --region $(AWS_REGION)
-	. "$(AWS_ENV_FILE)" && cd "$(PROJECT_DIR)" && AWS_REGION=$(AWS_REGION) $(GO) run ./cmd/main
+	cd "$(PROJECT_DIR)" && scripts/run-app-local.sh
 
-.PHONY: ijhttp
+dynamodb-start:
+	cd "$(PROJECT_DIR)" && scripts/start-dynamodb-local.sh
+
+dynamodb-stop:
+	cd "$(PROJECT_DIR)" && scripts/stop-dynamodb-local.sh
+
 ijhttp:
-	ijhttp instant-payments-verification.http --env-file=http-client.env.json --env=dev
+	cd "$(PROJECT_DIR)" && ijhttp instant-payments-verification.http --env-file=http-client.env.json --env=dev

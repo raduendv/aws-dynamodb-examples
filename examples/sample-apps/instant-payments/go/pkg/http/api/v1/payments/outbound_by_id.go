@@ -7,7 +7,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// OutboundByID is the legacy outbound payment handler registered by the sample.
+// OutboundByID is a legacy body-echo handler not registered by Module.
+// PaymentQuery serves the active outbound payment lookup route.
 type OutboundByID struct {
 	log *zap.Logger
 }
@@ -17,7 +18,7 @@ func (*OutboundByID) Pattern() string {
 	return "/api/v1/payments/outbound/{paymentID}"
 }
 
-// ServeHTTP handles a legacy outbound payment request.
+// ServeHTTP echoes the request body without looking up a payment.
 func (p *OutboundByID) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, r.Body); err != nil {
 		p.log.Warn("Failed to handle request", zap.Error(err))

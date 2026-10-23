@@ -1,0 +1,10 @@
+/bin/
+/main
+/.aws.env
+/.env
+/.env.*
+/x.go
+/.response/
+/.swagger-model.*/
+*.out
+.DS_Store

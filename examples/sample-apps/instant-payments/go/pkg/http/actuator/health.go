@@ -32,10 +32,13 @@ func (h *Health) ServeHTTP(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		Limit:     aws.Int32(1),
 	})
 
-	ddbOk := err == nil
+	status := "healthy"
+	if err != nil {
+		status = "unhealthy"
+	}
 
-	_ = e.Encode(map[string]interface{}{
-		"healthy": ddbOk,
+	_ = e.Encode(map[string]string{
+		"status": status,
 	})
 }
 

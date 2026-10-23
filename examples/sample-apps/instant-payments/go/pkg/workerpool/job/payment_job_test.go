@@ -1,31 +1,31 @@
+// This suite checks shared payment-processor invocation and failure propagation from payment jobs.
 package job
 
 import (
 	"context"
+	"errors"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types"
 	"go.uber.org/zap"
-
-	"instantpayments/pkg/model"
 )
 
-func TestPaymentJobRunsWithLoggerContext(t *testing.T) {
-	repository := &readRepository{payment: &model.Payment{Item: model.Item{PK: "PAYMENT#pay_1", SK: "PAYMENT#pay_1"}}}
-	job := &PaymentJob{
-		Record: map[string]types.AttributeValue{
-			"pk":           &types.AttributeValueMemberS{Value: "PAYMENT#pay_1"},
-			"sk":           &types.AttributeValueMemberS{Value: "PAYMENT#pay_1"},
-			"paymentId":    &types.AttributeValueMemberS{Value: "pay_1"},
-			"merchantId":   &types.AttributeValueMemberS{Value: "merchant_1"},
-			"state":        &types.AttributeValueMemberS{Value: "RECEIVED"},
-			"currency":     &types.AttributeValueMemberS{Value: "USD"},
-			"creditorIban": &types.AttributeValueMemberS{Value: "DE123"},
-		},
-	}
+func TestPaymentJobRunsSharedProcessor(t *testing.T) {
+	processor := &testPaymentProcessor{}
 	ctx := context.WithValue(context.Background(), ContextKeyLogger{}, zap.NewNop())
-	ctx = context.WithValue(ctx, ContextKeyRepository{}, Repository(repository))
-	if err := job.Run(ctx); err != nil {
+	ctx = context.WithValue(ctx, ContextKeyPaymentProcessor{}, processor)
+	if err := (&PaymentJob{PaymentID: "pay_1"}).Run(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if len(processor.processed) != 1 || processor.processed[0] != "pay_1" {
+		t.Fatalf("unexpected processed payment ids: %v", processor.processed)
+	}
+}
+
+func TestPaymentJobReturnsProcessorFailure(t *testing.T) {
+	processor := &testPaymentProcessor{processErr: errors.New("failed")}
+	ctx := context.WithValue(context.Background(), ContextKeyLogger{}, zap.NewNop())
+	ctx = context.WithValue(ctx, ContextKeyPaymentProcessor{}, processor)
+	if err := (&PaymentJob{PaymentID: "pay_1"}).Run(ctx); err == nil {
+		t.Fatal("expected processor failure")
 	}
 }

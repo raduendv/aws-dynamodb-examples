@@ -1,3 +1,4 @@
+// This suite checks supported-method recognition.
 package http
 
 import (

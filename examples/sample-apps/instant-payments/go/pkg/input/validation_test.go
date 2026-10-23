@@ -1,3 +1,4 @@
+// This suite verifies method validators, validation-module wiring, and request error responses.
 package input
 
 import (
@@ -11,17 +12,24 @@ import (
 	apphttp "instantpayments/pkg/http"
 )
 
+// validationFixture supplies a typed request body for validation tests.
 type validationFixture struct {
 	Name string `json:"name"`
 }
 
+// validationRoute exposes a caller-selected validator list without handler side effects.
 type validationRoute struct {
 	validators []any
 }
 
-func (*validationRoute) Pattern() string                              { return "/validation" }
+// Pattern returns the fixture route's fixed path.
+func (*validationRoute) Pattern() string { return "/validation" }
+
+// ServeHTTP intentionally performs no work so assertions isolate validation.
 func (*validationRoute) ServeHTTP(http.ResponseWriter, *http.Request) {}
-func (r *validationRoute) Validators() []any                          { return r.validators }
+
+// Validators returns the fixture's configured validators.
+func (r *validationRoute) Validators() []any { return r.validators }
 
 func TestWithRequestMethodValidator(t *testing.T) {
 	validator := WithRequestMethodValidator(apphttp.POST)

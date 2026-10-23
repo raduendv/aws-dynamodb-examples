@@ -1,3 +1,4 @@
+// This suite checks deterministic hashing, ignored fields, and unsupported-value errors.
 package util
 
 import (
@@ -5,6 +6,7 @@ import (
 	"time"
 )
 
+// hashFixture exercises supported scalar, timestamp, and byte fields plus an ignored identifier.
 type hashFixture struct {
 	Name      string
 	Count     int

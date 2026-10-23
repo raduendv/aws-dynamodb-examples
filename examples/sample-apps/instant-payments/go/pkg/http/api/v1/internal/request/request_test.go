@@ -1,3 +1,4 @@
+// This suite checks identifier syntax and allowed-method validation.
 package request
 
 import (
@@ -13,6 +14,7 @@ func TestValidIdentifier(t *testing.T) {
 		"pay_123-abc":                         true,
 		"":                                    false,
 		"pay$bad":                             false,
+		string(bytes.Repeat([]byte("a"), 64)): true,
 		string(bytes.Repeat([]byte("a"), 65)): false,
 	} {
 		if got := ValidIdentifier(value); got != want {

@@ -1,8 +1,11 @@
+// This suite exercises the in-memory HTTP payment lifecycle, idempotency,
+// account reads, merchant pagination, validation, and route wiring.
 package payments
 
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"instantpayments/pkg/service"
 )
 
+// newTestMux wires business routes to a fresh seeded in-memory service without Streams.
 func newTestMux() *http.ServeMux {
 	payment := service.NewPayment(zap.NewNop(), nil)
 	mux := http.NewServeMux()
@@ -30,6 +34,8 @@ func newTestMux() *http.ServeMux {
 	return mux
 }
 
+// performRequest sets JSON content type for nonempty bodies and returns status,
+// decoded output, and headers. Malformed response JSON fails the test.
 func performRequest(t *testing.T, handler http.Handler, method, target, body string) (int, map[string]any, http.Header) {
 	t.Helper()
 	recorder := httptest.NewRecorder()
@@ -114,6 +120,15 @@ func TestPaymentQueryHandlersCompleteLifecycle(t *testing.T) {
 	if status != http.StatusOK || payment["version"] != float64(3) {
 		t.Fatalf("expected payment history, got %d %#v", status, payment)
 	}
+	events := payment["events"].([]any)
+	if len(events) != 3 {
+		t.Fatalf("expected three replayed events, got %#v", events)
+	}
+	for _, event := range events {
+		if len(event.(map[string]any)) != 4 {
+			t.Fatalf("event response should expose exactly four contract fields, got %#v", event)
+		}
+	}
 	status, account, _ := performRequest(t, mux, http.MethodGet, "/api/v1/accounts/acc_usd_1", "")
 	if status != http.StatusOK || account["currentBalance"] != float64(9900) {
 		t.Fatalf("expected debited account, got %d %#v", status, account)
@@ -127,6 +142,105 @@ func TestPaymentQueryHandlersCompleteLifecycle(t *testing.T) {
 	status, missing, _ := performRequest(t, mux, http.MethodGet, "/api/v1/payments/outbound/pay$bad", "")
 	if status != http.StatusBadRequest || missing["error"] != "VALIDATION_ERROR" {
 		t.Fatalf("expected malformed payment id error, got %d %#v", status, missing)
+	}
+}
+
+func TestMerchantStateQueryAcceptsFundsReserved(t *testing.T) {
+	mux := newTestMux()
+	status, _, _ := performRequest(t, mux, http.MethodGet, "/api/v1/merchants/merchant-1/payments/state/FUNDS_RESERVED", "")
+	if status != http.StatusOK {
+		t.Fatalf("expected FUNDS_RESERVED to be accepted, got %d", status)
+	}
+}
+
+func TestMerchantQueryRejectsInvalidScanIndexForward(t *testing.T) {
+	handler := NewMerchantQuery(nil)
+	for _, query := range []string{
+		"scanIndexForward=",
+		"scanIndexForward=yes",
+		"scanIndexForward=1",
+		"scanIndexForward=true&scanIndexForward=false",
+	} {
+		t.Run(query, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/?"+query, nil)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			var payload map[string]any
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode validation response: %v", err)
+			}
+			if response.Code != http.StatusBadRequest || payload["error"] != "VALIDATION_ERROR" {
+				t.Fatalf("expected validation error before repository access, got %d %#v", response.Code, payload)
+			}
+		})
+	}
+}
+
+func TestMerchantQueriesRejectMalformedSyntaxBeforeServiceAccess(t *testing.T) {
+	for _, handler := range []*MerchantQuery{NewMerchantQuery(nil), NewMerchantStateQuery(nil)} {
+		for _, query := range []string{
+			"scanIndexForward=%ZZ", "limit=%ZZ", "nextToken=%ZZ",
+			"scanIndexForward=tru;e", "limit=1;2", "nextToken=abc;def",
+			"limit=10&nextToken=%", "%ZZ=value",
+		} {
+			t.Run(handler.Pattern()+"/"+query, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "/?"+query, nil)
+				req.SetPathValue("merchantID", "merchant")
+				req.SetPathValue("state", "RECEIVED")
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, req)
+				var payload map[string]any
+				if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+					t.Fatal(err)
+				}
+				if recorder.Code != http.StatusBadRequest || payload["error"] != "VALIDATION_ERROR" {
+					t.Fatalf("expected query validation before nil service access: %d %#v", recorder.Code, payload)
+				}
+			})
+		}
+	}
+}
+
+func TestMerchantQueryAcceptsOptionalCaseInsensitiveScanIndexForward(t *testing.T) {
+	mux := newTestMux()
+	for _, query := range []string{"", "?scanIndexForward=true", "?scanIndexForward=TRUE", "?scanIndexForward=false", "?scanIndexForward=FaLsE"} {
+		status, payload, _ := performRequest(t, mux, http.MethodGet, "/api/v1/merchants/merchant-1/payments"+query, "")
+		if status != http.StatusOK {
+			t.Fatalf("expected successful list for %q, got %d %#v", query, status, payload)
+		}
+	}
+}
+
+func TestMerchantQueriesNormalizeLimit(t *testing.T) {
+	mux := newTestMux()
+	for index := 0; index < 51; index++ {
+		body := fmt.Sprintf(`{"idempotencyKey":"limit-key-%d","merchantId":"merchant-limit","debtorAccountId":"acc_usd_1","creditorIban":"RO49AAAA1B31007593840000","creditorName":"Jane Doe","amount":1,"currency":"USD"}`, index)
+		status, payload, _ := performRequest(t, mux, http.MethodPost, "/api/v1/payments/outbound", body)
+		if status != http.StatusCreated {
+			t.Fatalf("expected created payment, got %d %#v", status, payload)
+		}
+	}
+	for _, route := range []string{"/payments", "/payments/state/RECEIVED"} {
+		for _, testCase := range []struct {
+			query string
+			count int
+		}{
+			{"", 50},
+			{"?limit=0", 50},
+			{"?limit=-1", 50},
+			{"?limit=1", 1},
+			{"?limit=101", 51},
+		} {
+			t.Run(route+testCase.query, func(t *testing.T) {
+				status, payload, _ := performRequest(t, mux, http.MethodGet, "/api/v1/merchants/merchant-limit"+route+testCase.query, "")
+				if status != http.StatusOK {
+					t.Fatalf("expected successful list, got %d %#v", status, payload)
+				}
+				if items := payload["items"].([]any); len(items) != testCase.count {
+					t.Fatalf("expected %d items, got %d", testCase.count, len(items))
+				}
+			})
+		}
 	}
 }
 

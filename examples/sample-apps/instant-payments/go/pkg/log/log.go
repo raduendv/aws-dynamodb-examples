@@ -2,6 +2,7 @@ package log
 
 import "go.uber.org/zap"
 
+// EchoHandler holds the logger dependency for the diagnostic echo facade.
 type EchoHandler struct {
 	log *zap.Logger
 }

@@ -1,3 +1,4 @@
+// This suite checks diagnostic request-body echo behavior.
 package v1
 
 import (

@@ -1,0 +1,8 @@
+{
+  "name": "instant-payments-swagger-ui-assets",
+  "private": true,
+  "description": "Pinned upstream Swagger UI assets embedded in the Go executable; no Node.js runtime is required.",
+  "dependencies": {
+    "swagger-ui-dist": "5.34.0"
+  }
+}

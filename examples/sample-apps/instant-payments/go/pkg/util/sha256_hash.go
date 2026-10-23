@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// Sha256Hash hashes supported struct fields in declaration order, skipping hash:"-".
+// It rejects nil, non-struct and unsupported fields. Payment intent hashing uses
+// its separate length-prefixed exact-decimal contract, not this legacy helper.
 func Sha256Hash[T any](v T) (string, error) {
 	rv := reflect.ValueOf(v)
 

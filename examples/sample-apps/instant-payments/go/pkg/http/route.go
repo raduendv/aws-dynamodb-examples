@@ -19,6 +19,7 @@ type RoutesOut struct {
 	Routes []Route `group:"routes"`
 }
 
+// RoutesIn injects the registered handler group into the HTTP server.
 type RoutesIn struct {
 	fx.In
 	Routes []Route `group:"routes"`

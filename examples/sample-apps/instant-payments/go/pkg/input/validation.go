@@ -114,6 +114,7 @@ func ValidateRequest[T any](r http.Route, req *stdhttp.Request) (*T, ResponseWri
 	}
 }
 
+// WithRequestMethodValidator returns a validator rejecting methods outside the supplied set.
 func WithRequestMethodValidator(acceptedMethods ...http.Method) RequestValidator {
 	return func(req *stdhttp.Request) error {
 		if !slices.Contains(acceptedMethods, http.Method(req.Method)) {
@@ -127,6 +128,8 @@ func WithRequestMethodValidator(acceptedMethods ...http.Method) RequestValidator
 	}
 }
 
+// WithInputValidator supplies the legacy no-op typed-validator extension point.
+// Business input validation is performed by the concrete payment handlers and service.
 func WithInputValidator[T any]() ValidatorFunc[T] {
 	return func(t *T) error {
 		if t == nil {

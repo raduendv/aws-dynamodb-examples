@@ -1,3 +1,4 @@
+// This suite checks account overview and reservation batch responses, validation, and methods.
 package accounts
 
 import (
@@ -12,6 +13,7 @@ import (
 	"instantpayments/pkg/service"
 )
 
+// accountRequest runs a handler request and returns its status and decoded JSON object.
 func accountRequest(t *testing.T, handler http.Handler, method, target, body string) (int, map[string]any) {
 	t.Helper()
 	recorder := httptest.NewRecorder()

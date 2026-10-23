@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodbstreams/attributevalue"
+	"instantpayments/pkg/model"
+
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types"
 	"go.uber.org/zap"
 )
@@ -14,7 +16,9 @@ type AccountJob struct {
 	Account map[string]types.AttributeValue
 }
 
-// Run executes the account job.
+// Run decodes the account image, reads the stored account using the worker's
+// repository, and logs it. Missing dependencies, decoding, and read failures
+// are returned without changing account state.
 func (a *AccountJob) Run(ctx context.Context) error {
 	logVal := ctx.Value(ContextKeyLogger{})
 	if logVal == nil {
@@ -35,13 +39,12 @@ func (a *AccountJob) Run(ctx context.Context) error {
 		return fmt.Errorf("account stream image is empty")
 	}
 
-	var account struct {
-		PK       string `dynamodbav:"pk"`
-		SK       string `dynamodbav:"sk"`
-		Currency string `dynamodbav:"currency"`
-		Status   string `dynamodbav:"status"`
+	image, err := attributevalue.FromDynamoDBStreamsMap(a.Account)
+	if err != nil {
+		return fmt.Errorf("convert account stream image: %w", err)
 	}
-	if err := attributevalue.UnmarshalMap(a.Account, &account); err != nil {
+	var account model.Account
+	if err := attributevalue.UnmarshalMap(image, &account); err != nil {
 		return fmt.Errorf("decode account stream image: %w", err)
 	}
 	stored, err := repository.GetAccount(ctx, account.PK, account.SK)
@@ -51,7 +54,7 @@ func (a *AccountJob) Run(ctx context.Context) error {
 	if stored == nil {
 		return fmt.Errorf("account %q not found in repository", account.PK)
 	}
-	log.Info("AccountJob processed account", zap.String("accountId", account.PK), zap.String("currency", account.Currency), zap.String("status", account.Status))
+	log.Info("AccountJob processed account", zap.String("accountId", string(account.PK)), zap.String("currency", account.Currency), zap.String("status", string(account.Status)))
 
 	return nil
 }

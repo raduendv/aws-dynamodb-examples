@@ -1,0 +1,1022 @@
+{
+  "info": {
+    "version": "1.0.0",
+    "title": "Instant Payments API",
+    "description": "REST API for the Instant Payments sample: initiate and process outbound payments, inspect account balances and reservations, and browse merchant payments.",
+    "contact": {
+      "name": "AWS DynamoDB Examples",
+      "url": "https://github.com/aws-samples/aws-dynamodb-examples"
+    }
+  },
+  "servers": [
+    {"url": "http://localhost:8080", "description": "Local Instant Payments sample"}
+  ],
+  "paths": {
+    "/actuator/health": {
+      "get": {
+        "tags": [
+          "Infrastructure"
+        ],
+        "summary": "Actuator health check",
+        "description": "Help operators determine whether the configured payment store is reachable.",
+        "operationId": "getActuatorHealth",
+        "responses": {
+          "503": {"$ref": "#/components/responses/ServerUnavailable"},
+          "200": {
+            "description": "Health probe completed; status is healthy or unhealthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api-docs": {
+      "get": {
+        "tags": [
+          "Infrastructure"
+        ],
+        "summary": "Published OpenAPI discovery document",
+        "description": "Discover the payment API contract before running business workflows, without reading or changing payment data. Available only when documentation is enabled.",
+        "operationId": "getApiDocs",
+        "responses": {
+          "503": {"$ref": "#/components/responses/ServerUnavailable"},
+          "405": {"$ref": "#/components/responses/DocumentationMethodNotAllowed"},
+          "200": {
+            "description": "OpenAPI document describing the service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payments/outbound": {
+      "post": {
+        "tags": [
+          "Outbound Payments"
+        ],
+        "summary": "Create (initiate) an outbound payment",
+        "description": "Initiate an outbound payment exactly once for a client idempotency key. Identical retries replay the original creation response; a different payload cannot reuse the key.",
+        "operationId": "createOutboundPayment",
+        "responses": {
+          "405": {"$ref": "#/components/responses/PostMethodNotAllowed"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "503": {"$ref": "#/components/responses/DependencyUnavailable"},
+          "201": {
+            "description": "Payment created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOutboundPaymentResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Idempotent replay of a previously created payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOutboundPaymentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: missing or blank fields, invalid amount or currency, or malformed JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT: idempotency key reused with a different canonical request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOutboundPaymentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payments/outbound/{paymentId}": {
+      "get": {
+        "tags": [
+          "Outbound Payments"
+        ],
+        "summary": "Get an outbound payment with its event history",
+        "description": "Inspect a payment's current business state and ordered lifecycle events.",
+        "operationId": "getOutboundPayment",
+        "parameters": [
+          {
+            "name": "paymentId",
+            "in": "path",
+            "required": true,
+            "description": "Identifier of the payment",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "400": {"$ref": "#/components/responses/InvalidIdentifier"},
+          "405": {"$ref": "#/components/responses/GetMethodNotAllowed"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "503": {"$ref": "#/components/responses/DependencyUnavailable"},
+          "200": {
+            "description": "Payment found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetOutboundPaymentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PAYMENT_NOT_FOUND: no payment exists for this identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payments/outbound/{paymentId}/process": {
+      "post": {
+        "tags": [
+          "Outbound Payments"
+        ],
+        "summary": "Process an outbound payment (validate, reserve, complete or reject)",
+        "description": "Advances the payment through its lifecycle. Processing is idempotent for terminal states (COMPLETED/REJECTED) and returns the current terminal state on repeat calls.",
+        "operationId": "processOutboundPayment",
+        "parameters": [
+          {
+            "name": "paymentId",
+            "in": "path",
+            "required": true,
+            "description": "Identifier of the payment to process",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "400": {"$ref": "#/components/responses/InvalidIdentifier"},
+          "405": {"$ref": "#/components/responses/PostMethodNotAllowed"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "503": {"$ref": "#/components/responses/DependencyUnavailable"},
+          "200": {
+            "description": "Payment processed (COMPLETED or REJECTED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessPaymentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PAYMENT_NOT_FOUND or ACCOUNT_NOT_FOUND: payment or debtor account does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{accountId}": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get an account with balances and reservations",
+        "description": "Inspect an account's current and spendable balances together with its reservation audit history, including ACTIVE, CONSUMED, and RELEASED reservations.",
+        "operationId": "getAccount",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true,
+            "description": "Account identifier (^[A-Za-z0-9_-]+$, max 64 chars)",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "405": {"$ref": "#/components/responses/GetMethodNotAllowed"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "503": {"$ref": "#/components/responses/DependencyUnavailable"},
+          "200": {
+            "description": "Account found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAccountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: malformed or too-long accountId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ACCOUNT_NOT_FOUND: no account exists for this identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{accountId}/batch-get-reservations": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Batch get reservations for an account",
+        "description": "Reconcile requested account reservations in one lookup. Duplicate identifiers are deduplicated; absent reservations are reported separately as missingReservationIds.",
+        "operationId": "batchGetReservations",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true,
+            "description": "Account identifier (^[A-Za-z0-9_-]+$, max 64 chars)",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "405": {"$ref": "#/components/responses/PostMethodNotAllowed"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "503": {"$ref": "#/components/responses/DependencyUnavailable"},
+          "200": {
+            "description": "Reservation lookup result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchGetReservationsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: malformed JSON or accountId, empty or oversized reservationIds, or blank element; INVALID_BATCH_GET_RESERVATIONS_REQUEST: no distinct reservation identifiers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchGetReservationsRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/merchants/{merchantId}/payments": {
+      "get": {
+        "tags": [
+          "Merchant Payments"
+        ],
+        "summary": "List payments for a merchant (GSI, newest first by default)",
+        "description": "Browse a merchant's payment activity in creation order using a continuation token. A DynamoDB secondary index supplies the merchant projection.",
+        "operationId": "listMerchantPayments",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "description": "Merchant identifier",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items per page. Non-positive values default to 50; values above 100 are capped at 100.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "default": 50
+            }
+          },
+          {
+            "name": "scanIndexForward",
+            "in": "query",
+            "required": false,
+            "description": "Optional case-insensitive boolean. Missing defaults to false (newest first); true returns oldest payments first. Any supplied value other than true or false returns 400 VALIDATION_ERROR.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "nextToken",
+            "in": "query",
+            "required": false,
+            "description": "Opaque pagination token from a previous response (this route only).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "405": {"$ref": "#/components/responses/GetMethodNotAllowed"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "503": {"$ref": "#/components/responses/DependencyUnavailable"},
+          "200": {
+            "description": "A page of merchant payment projections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantPaymentsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: malformed URL query syntax (including invalid percent escapes or unescaped semicolons), malformed merchantId, non-integer limit, or scanIndexForward other than case-insensitive true/false; INVALID_PAGINATION_TOKEN: invalid decoded token or a token bound to another route, merchant, state, or direction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/merchants/{merchantId}/payments/state/{state}": {
+      "get": {
+        "tags": [
+          "Merchant Payments"
+        ],
+        "summary": "List payments for a merchant filtered by state (GSI)",
+        "description": "Review a merchant's payments in one lifecycle state, with stable pagination and creation ordering. The state-specific DynamoDB secondary index avoids scanning unrelated payments.",
+        "operationId": "listMerchantPaymentsByState",
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "description": "Merchant identifier",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          },
+          {
+            "name": "state",
+            "in": "path",
+            "required": true,
+            "description": "Case-insensitive payment state; the named values are canonical uppercase forms.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^([Rr][Ee][Cc][Ee][Ii][Vv][Ee][Dd]|[Ff][Uu][Nn][Dd][Ss]_[Rr][Ee][Ss][Ee][Rr][Vv][Ee][Dd]|[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Ee][Dd]|[Rr][Ee][Jj][Ee][Cc][Tt][Ee][Dd])$",
+              "example": "COMPLETED"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items per page. Non-positive values default to 50; values above 100 are capped at 100.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "default": 50
+            }
+          },
+          {
+            "name": "scanIndexForward",
+            "in": "query",
+            "required": false,
+            "description": "Optional case-insensitive boolean. Missing defaults to false (newest first); true returns oldest payments first. Any supplied value other than true or false returns 400 VALIDATION_ERROR.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "nextToken",
+            "in": "query",
+            "required": false,
+            "description": "Opaque pagination token from a previous response (this route only).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "405": {"$ref": "#/components/responses/GetMethodNotAllowed"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "503": {"$ref": "#/components/responses/DependencyUnavailable"},
+          "200": {
+            "description": "A page of merchant payment projections for the given state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantPaymentsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: malformed URL query syntax (including invalid percent escapes or unescaped semicolons), malformed path, non-integer limit, or scanIndexForward other than case-insensitive true/false; INVALID_PAYMENT_STATE: unsupported well-formed state; INVALID_PAGINATION_TOKEN: malformed decoded token or mismatched route, merchant, state, or direction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/echo": {
+      "post": {
+        "tags": ["Infrastructure"],
+        "summary": "Echo a diagnostic request",
+        "description": "Check request-body delivery during local integration without accessing payment data. This development diagnostic accepts any HTTP method and returns the supplied bytes unchanged; the host detects the response content type from those bytes.",
+        "operationId": "echoDiagnostic",
+        "requestBody": {
+          "required": false,
+          "content": {"*/*": {"schema": {"type": "string", "format": "binary"}}}
+        },
+        "responses": {
+          "503": {"$ref": "#/components/responses/ServerUnavailable"},
+          "200": {
+            "description": "Unchanged request bytes, or an empty body when no bytes were provided",
+            "content": {"*/*": {"schema": {"type": "string", "format": "binary"}}}
+          }
+        }
+      }
+    },
+    "/swagger-ui.html": {
+      "get": {
+        "tags": ["Infrastructure"],
+        "summary": "Open interactive payment API documentation",
+        "description": "Explore the payment contract and send example requests with the embedded Swagger UI. Available only when documentation is enabled; no payment data is accessed to render documentation.",
+        "operationId": "openSwaggerUI",
+        "responses": {
+          "503": {"$ref": "#/components/responses/ServerUnavailable"},
+          "302": {
+            "description": "Redirect to the embedded interactive documentation",
+            "headers": {"Location": {"description": "Local Swagger UI entry point", "schema": {"type": "string", "enum": ["/swagger-ui/index.html"]}}},
+            "content": {"text/html": {"schema": {"type": "string"}}}
+          },
+          "405": {"$ref": "#/components/responses/DocumentationMethodNotAllowed"}
+        }
+      }
+    },
+    "/swagger-ui/index.html": {
+      "get": {
+        "tags": ["Infrastructure"],
+        "summary": "Render interactive payment API documentation",
+        "description": "Inspect the API and try payment operations in the official Swagger UI, using locally embedded scripts and the published contract.",
+        "operationId": "getSwaggerUI",
+        "responses": {
+          "503": {"$ref": "#/components/responses/ServerUnavailable"},
+          "200": {
+            "description": "Offline-capable Swagger UI page",
+            "headers": {"X-Content-Type-Options": {"schema": {"type": "string", "enum": ["nosniff"]}}},
+            "content": {"text/html": {"schema": {"type": "string"}}}
+          },
+          "405": {"$ref": "#/components/responses/DocumentationMethodNotAllowed"}
+        }
+      }
+    }
+  },
+  "openapi": "3.0.3",
+  "components": {
+    "responses": {
+      "InvalidIdentifier": {
+        "description": "VALIDATION_ERROR: identifier must contain 1 to 64 ASCII letters, digits, underscores, or hyphens",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+      },
+      "InternalError": {
+        "description": "INTERNAL_ERROR: unexpected dependency failure or inconsistent stored payment data",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+      },
+      "ServerUnavailable": {
+        "description": "ASYNC_REQUEST_CAPACITY_EXHAUSTED: the bounded server queue is full. REQUEST_TIMEOUT: the async request deadline expired. These server middleware errors do not indicate a domain DynamoDB operation and do not include Retry-After.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+      },
+      "DependencyUnavailable": {
+        "description": "A 503 response may report THROUGHPUT_EXCEEDED, REQUEST_LIMIT_EXCEEDED, or DYNAMODB_INTERNAL_ERROR for transient store failures; TABLE_NOT_FOUND for a missing configured table; ASYNC_REQUEST_CAPACITY_EXHAUSTED when the bounded server queue is full; or REQUEST_TIMEOUT when the request deadline expires.",
+        "headers": {
+          "Retry-After": {
+            "description": "Exactly 1 second for THROUGHPUT_EXCEEDED, REQUEST_LIMIT_EXCEEDED, and DYNAMODB_INTERNAL_ERROR only; absent for TABLE_NOT_FOUND and server middleware errors.",
+            "schema": {"type": "string", "enum": ["1"]}
+          }
+        },
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+      },
+      "GetMethodNotAllowed": {
+        "description": "METHOD_NOT_ALLOWED: this business operation accepts GET only",
+        "headers": {"Allow": {"schema": {"type": "string", "enum": ["GET"]}}},
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+      },
+      "PostMethodNotAllowed": {
+        "description": "METHOD_NOT_ALLOWED: this business operation accepts POST only",
+        "headers": {"Allow": {"schema": {"type": "string", "enum": ["POST"]}}},
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+      },
+      "DocumentationMethodNotAllowed": {
+        "description": "METHOD_NOT_ALLOWED: documentation accepts GET and HEAD only",
+        "headers": {"Allow": {"schema": {"type": "string", "enum": ["GET, HEAD"]}}},
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "healthy"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error",
+          "message",
+          "timestamp"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Machine-readable error code",
+            "example": "VALIDATION_ERROR"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error description"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateOutboundPaymentRequest": {
+        "type": "object",
+        "required": [
+          "idempotencyKey",
+          "merchantId",
+          "debtorAccountId",
+          "creditorIban",
+          "creditorName",
+          "amount",
+          "currency"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Nonblank client-supplied idempotency key; a UUID is not required."
+          },
+          "merchantId": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Nonblank merchant identifier; initiation does not apply the lookup path length or character restrictions."
+          },
+          "debtorAccountId": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "creditorIban": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Nonblank creditor IBAN; no IBAN checksum validation is performed."
+          },
+          "creditorName": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Positive payment amount",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3,
+            "description": "Currency code, exactly three bytes and unchanged by uppercasing; no ISO currency registry lookup is performed.",
+            "example": "USD"
+          }
+        }
+      },
+      "CreateOutboundPaymentResponse": {
+        "type": "object",
+        "required": [
+          "paymentId",
+          "state",
+          "correlationId",
+          "createdAtUtc"
+        ],
+        "properties": {
+          "paymentId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "example": "RECEIVED"
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ProcessPaymentResponse": {
+        "type": "object",
+        "required": [
+          "paymentId",
+          "state",
+          "reasonCode"
+        ],
+        "properties": {
+          "paymentId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "example": "COMPLETED"
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "GetOutboundPaymentResponse": {
+        "type": "object",
+        "required": [
+          "paymentId",
+          "state",
+          "correlationId",
+          "createdAtUtc",
+          "updatedAtUtc",
+          "debtorAccountId",
+          "creditorIban",
+          "creditorName",
+          "amount",
+          "currency",
+          "idempotencyKey",
+          "reasonCode",
+          "version",
+          "events"
+        ],
+        "properties": {
+          "paymentId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "debtorAccountId": {
+            "type": "string"
+          },
+          "creditorIban": {
+            "type": "string"
+          },
+          "creditorName": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentEvent"
+            }
+          }
+        }
+      },
+      "PaymentEvent": {
+        "type": "object",
+        "required": [
+          "eventKey",
+          "eventType",
+          "reasonCode",
+          "correlationId"
+        ],
+        "properties": {
+          "eventKey": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "GetAccountResponse": {
+        "type": "object",
+        "required": [
+          "accountId",
+          "status",
+          "currency",
+          "currentBalance",
+          "availableBalance",
+          "reservations"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currentBalance": {
+            "type": "number"
+          },
+          "availableBalance": {
+            "type": "number"
+          },
+          "reservations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReservationResponse"
+            }
+          }
+        }
+      },
+      "ReservationResponse": {
+        "type": "object",
+        "required": [
+          "reservationId",
+          "paymentId",
+          "amount",
+          "status",
+          "createdAtUtc"
+        ],
+        "properties": {
+          "reservationId": {
+            "type": "string"
+          },
+          "paymentId": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BatchGetReservationsRequest": {
+        "type": "object",
+        "required": [
+          "reservationIds"
+        ],
+        "properties": {
+          "reservationIds": {
+            "type": "array",
+            "description": "Reservation ids to look up (1-100, deduplicated).",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S",
+              "description": "Nonblank reservation identifier. Duplicate values are allowed and deduplicated after the input array length check."
+            }
+          }
+        }
+      },
+      "BatchGetReservationsResponse": {
+        "type": "object",
+        "required": [
+          "reservations",
+          "missingReservationIds"
+        ],
+        "properties": {
+          "reservations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReservationResponse"
+            }
+          },
+          "missingReservationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MerchantPaymentsPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantPaymentProjection"
+            }
+          },
+          "nextToken": {
+            "type": "string",
+            "description": "Present only when a further page exists.",
+            "nullable": true
+          }
+        }
+      },
+      "MerchantPaymentProjection": {
+        "type": "object",
+        "required": [
+          "paymentId",
+          "state",
+          "version",
+          "merchantId",
+          "correlationId",
+          "amount",
+          "currency",
+          "createdAtUtc",
+          "updatedAtUtc",
+          "reasonCode"
+        ],
+        "properties": {
+          "paymentId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "merchantId": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "amount": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "createdAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      }
+    }
+  }
+}

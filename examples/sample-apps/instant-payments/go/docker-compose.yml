@@ -1,0 +1,47 @@
+services:
+  extenddb:
+    image: extenddb/extenddb-dev@sha256:20678dcdfedf2b9135b269cc58a19c1e2c72e22ac8774ad201f51b3d6f0064fe
+    environment:
+      EXTENDDB__STORAGE__SQLITE__PATH: ":memory:"
+      EXTENDDB_DEV_ACCESS_KEY_ID: "AKIAlocal"
+      EXTENDDB_DEV_SECRET_ACCESS_KEY: "local"
+    ports:
+      - "127.0.0.1:8000:18080"
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    build: .
+    profiles: ["app"]
+    depends_on:
+      - extenddb
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      HTTP_SERVER_ADDRESS: ":8080"
+      DYNAMODB_ENDPOINT: "http://extenddb:18080"
+      DYNAMODB_REGION: "${DYNAMODB_REGION:-eu-west-1}"
+      DYNAMODB_CLIENTTYPE: "${DYNAMODB_CLIENTTYPE:-high-level}"
+      DYNAMODB_TABLE_INSTANTPAYMENTS_NAME: "${DYNAMODB_TABLE_INSTANTPAYMENTS_NAME:-GoInstantPayments}"
+      DYNAMODB_PROVISIONING_CREATERESOURCES: "${DYNAMODB_PROVISIONING_CREATERESOURCES:-true}"
+      DYNAMODB_TABLE_INSTANTPAYMENTS_IDEMPOTENCY_TTL: "${DYNAMODB_TABLE_INSTANTPAYMENTS_IDEMPOTENCY_TTL:-2592000}"
+      DYNAMODB_TABLE_INSTANTPAYMENTS_RESERVATION_TIMEOUT: "${DYNAMODB_TABLE_INSTANTPAYMENTS_RESERVATION_TIMEOUT:-900}"
+      DYNAMODB_STREAMS_ITERATOR_TYPE: "${DYNAMODB_STREAMS_ITERATOR_TYPE:-LATEST}"
+      DYNAMODB_STREAMS_ENABLED: "${DYNAMODB_STREAMS_ENABLED:-true}"
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for attempt in $$(seq 1 60); do
+          if curl --silent --fail --max-time 2 --output /dev/null \
+            --aws-sigv4 "aws:amz:$$DYNAMODB_REGION:dynamodb" --user AKIAlocal:local \
+            --header 'Content-Type: application/x-amz-json-1.0' \
+            --header 'X-Amz-Target: DynamoDB_20120810.ListTables' \
+            --data '{}' http://extenddb:18080; then
+            exec /app/instantpayments
+          fi
+          sleep 1
+        done
+        echo 'DynamoDB Local did not become ready' >&2
+        exit 1

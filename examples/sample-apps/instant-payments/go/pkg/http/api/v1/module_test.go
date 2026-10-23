@@ -1,3 +1,4 @@
+// This suite checks versioned API module construction.
 package v1
 
 import (

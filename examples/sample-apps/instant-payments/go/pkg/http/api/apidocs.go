@@ -1,12 +1,15 @@
 package api
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	stdhttp "net/http"
-
-	"instantpayments/gen/restapi"
+	"time"
 )
+
+//go:embed swagger.json
+var swaggerJSON []byte
 
 // APIDocsHandler serves the embedded OpenAPI document.
 type APIDocsHandler struct {
@@ -19,22 +22,42 @@ func (*APIDocsHandler) Pattern() string {
 }
 
 // ServeHTTP writes the OpenAPI document as JSON.
-func (h *APIDocsHandler) ServeHTTP(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+func (h *APIDocsHandler) ServeHTTP(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if !documentationMethod(w, r) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
+	if r.Method == stdhttp.MethodHead {
+		return
+	}
 	e := json.NewEncoder(w)
 	e.SetIndent("", "  ")
 	if err := e.Encode(h.document); err != nil {
-
 		return
 	}
+}
+
+// documentationMethod keeps documentation reads side-effect free and reports
+// unsupported methods using the same public error shape as the business API.
+func documentationMethod(w stdhttp.ResponseWriter, r *stdhttp.Request) bool {
+	if r.Method == stdhttp.MethodGet || r.Method == stdhttp.MethodHead {
+		return true
+	}
+	w.Header().Set("Allow", "GET, HEAD")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(stdhttp.StatusMethodNotAllowed)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": "METHOD_NOT_ALLOWED", "message": "method not allowed",
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	return false
 }
 
 // NewAPIDocsHandler parses the embedded OpenAPI document.
 func NewAPIDocsHandler() (*APIDocsHandler, error) {
 	var document map[string]interface{}
-	if err := json.Unmarshal(restapi.SwaggerJSON, &document); err != nil {
+	if err := json.Unmarshal(swaggerJSON, &document); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal swagger JSON: %w", err)
 	}
-	document["openapi"] = "3.0.0"
 	return &APIDocsHandler{document: document}, nil
 }

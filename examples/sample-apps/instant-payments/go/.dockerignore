@@ -1,0 +1,10 @@
+.git
+.aws.env
+*.env
+x.go
+bin/
+main
+.response/
+.swagger-model.*/
+*.out
+.DS_Store

@@ -1,3 +1,4 @@
+// This suite checks error-response serialization.
 package util
 
 import (

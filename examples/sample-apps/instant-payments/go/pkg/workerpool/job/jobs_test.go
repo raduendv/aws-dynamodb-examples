@@ -1,3 +1,4 @@
+// This suite checks account-job execution with worker context and repository fixtures.
 package job
 
 import (
@@ -10,21 +11,24 @@ import (
 	"instantpayments/pkg/model"
 )
 
+// readRepository returns selected account and payment rows without persistence.
 type readRepository struct {
 	account *model.Account
 	payment *model.Payment
 }
 
-func (r *readRepository) GetAccount(context.Context, string, string) (*model.Account, error) {
+// GetAccount returns the configured row, or nil to represent absence.
+func (r *readRepository) GetAccount(context.Context, model.AccountKey, model.AccountKey) (*model.Account, error) {
 	return r.account, nil
 }
 
+// GetPayment returns the configured row, or nil to represent absence.
 func (r *readRepository) GetPayment(context.Context, string) (*model.Payment, error) {
 	return r.payment, nil
 }
 
 func TestAccountJobRunsWithLoggerContext(t *testing.T) {
-	repository := &readRepository{account: &model.Account{Item: model.Item{PK: "ACCOUNT#alice", SK: "ACCOUNT#alice"}}}
+	repository := &readRepository{account: &model.Account{AccountKeys: model.AccountKeys{PK: "alice", SK: "alice"}}}
 	job := &AccountJob{
 		Account: map[string]types.AttributeValue{
 			"pk":       &types.AttributeValueMemberS{Value: "ACCOUNT#alice"},

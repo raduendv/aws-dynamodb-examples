@@ -2,12 +2,18 @@ package payments
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"instantpayments/pkg/http/api/v1/internal/request"
 	"instantpayments/pkg/http/api/v1/internal/response"
 	"instantpayments/pkg/service"
+)
+
+const (
+	// defaultMerchantPaymentLimit balances useful page sizes with bounded query work.
+	defaultMerchantPaymentLimit = 50
 )
 
 // PaymentQuery serves payment lookup requests.
@@ -45,6 +51,7 @@ type MerchantQuery struct {
 	state   bool
 }
 
+// Pattern returns the merchant payment list route.
 func (h *MerchantQuery) Pattern() string {
 	if h.state {
 		return "/api/v1/merchants/{merchantID}/payments/state/{state}"
@@ -69,30 +76,48 @@ func (h *MerchantQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		state = strings.ToUpper(state)
-		if state != "RECEIVED" && state != "COMPLETED" && state != "REJECTED" {
+		if state != "RECEIVED" && state != "FUNDS_RESERVED" && state != "COMPLETED" && state != "REJECTED" {
 			response.WriteError(w, &service.DomainError{Status: 400, Code: "INVALID_PAYMENT_STATE", Text: "invalid payment state"})
 
 			return
 		}
 	}
 
-	limit := 50
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil {
-			response.WriteError(w, &service.DomainError{Status: 400, Code: "VALIDATION_ERROR", Text: "limit must be a positive integer"})
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		response.WriteError(w, &service.DomainError{Status: http.StatusBadRequest, Code: "VALIDATION_ERROR", Text: "invalid query syntax"})
+		return
+	}
+	forward := false
+	if values, supplied := query["scanIndexForward"]; supplied {
+		if len(values) != 1 {
+			response.WriteError(w, &service.DomainError{Status: 400, Code: "VALIDATION_ERROR", Text: "scanIndexForward must be true or false"})
 
 			return
 		}
-		if parsed > 100 {
-			parsed = 100
-		}
-		if parsed > 0 {
-			limit = parsed
+		switch {
+		case strings.EqualFold(values[0], "true"):
+			forward = true
+		case strings.EqualFold(values[0], "false"):
+			forward = false
+		default:
+			response.WriteError(w, &service.DomainError{Status: 400, Code: "VALIDATION_ERROR", Text: "scanIndexForward must be true or false"})
+
+			return
 		}
 	}
 
-	forward := strings.EqualFold(r.URL.Query().Get("scanIndexForward"), "true")
+	limit := defaultMerchantPaymentLimit
+	if raw := query.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			response.WriteError(w, &service.DomainError{Status: 400, Code: "VALIDATION_ERROR", Text: "limit must be an integer"})
+
+			return
+		}
+		limit = parsed
+	}
+
 	merchant := r.PathValue("merchantID")
 	if !request.ValidIdentifier(merchant) {
 		response.WriteError(w, &service.DomainError{Status: 400, Code: "VALIDATION_ERROR", Text: "invalid merchant id"})
@@ -100,7 +125,7 @@ func (h *MerchantQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.payment.List(merchant, state, route, r.URL.Query().Get("nextToken"), limit, forward)
+	result, err := h.payment.List(merchant, state, route, query.Get("nextToken"), limit, forward)
 	if err != nil {
 		response.WriteError(w, err)
 

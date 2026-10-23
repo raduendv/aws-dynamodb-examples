@@ -27,7 +27,7 @@ func (h *Process) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.payment.Process(id)
+	result, err := h.payment.ProcessContext(r.Context(), id)
 	if err != nil {
 		response.WriteError(writer, err)
 

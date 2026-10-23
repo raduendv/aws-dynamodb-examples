@@ -6,6 +6,7 @@ import (
 	"go.uber.org/fx"
 )
 
+// Module registers creation, tracking and merchant payment-list handlers.
 func Module() fx.Option {
 	return fx.Module("http.api.v1.payments",
 		fx.Provide(fx.Annotate(

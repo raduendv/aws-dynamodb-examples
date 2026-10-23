@@ -23,7 +23,11 @@ func (*Outbound) Pattern() string {
 	return "/api/v1/payments/outbound"
 }
 
-// ServeHTTP validates and creates an outbound payment.
+// ServeHTTP accepts POST JSON OutboundPaymentInput. Creation atomically stores
+// the head, creation event and idempotency binding (201); an identical key/body
+// replays the original response (200), while a changed request returns 409.
+// Method/JSON/domain validation returns 405/400. DynamoDB errors use the shared
+// 500/503 envelope. Settlement happens later through Streams, not this handler.
 func (h *Outbound) ServeHTTP(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if !request.RequireMethod(w, r, stdhttp.MethodPost) {
 		return

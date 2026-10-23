@@ -1,0 +1,44 @@
+name: Instant Payments Go
+
+on:
+  pull_request:
+    paths:
+      - 'examples/sample-apps/instant-payments/go/**'
+      - '.github/workflows/instant-payments-go.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'examples/sample-apps/instant-payments/go/**'
+      - '.github/workflows/instant-payments-go.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: examples/sample-apps/instant-payments/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: examples/sample-apps/instant-payments/go/go.mod
+          cache-dependency-path: examples/sample-apps/instant-payments/go/go.sum
+      - name: Check formatting and shell syntax
+        run: |
+          test -z "$(gofmt -l cmd pkg)"
+          for script in scripts/*.sh; do bash -n "$script"; done
+      - name: Verify module checksums
+        run: go mod verify
+      - name: Test with race detection
+        run: go test -race ./...
+      - name: Enforce application coverage
+        run: scripts/run-tests.sh --coverage
+      - name: Vet and build
+        run: |
+          go vet ./...
+          scripts/build-app.sh --skip-tests

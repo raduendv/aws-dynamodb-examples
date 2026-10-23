@@ -9,6 +9,7 @@ import (
 	"go.uber.org/fx"
 )
 
+// Module composes version-one business routes and the local diagnostic echo route.
 func Module() fx.Option {
 	return fx.Module("http.api.v1",
 		fx.Provide(fx.Annotate(
@@ -21,19 +22,3 @@ func Module() fx.Option {
 		operations.Module(),
 	)
 }
-
-// GET	/api/v1/accounts/{accountId}/batch-get-reservations`
-// GET	/api/v1/accounts/{accountId}/reservations`
-// GET	/api/v1/accounts/{accountId}`
-// GET	/api/v1/demo/dynamodb/access-patterns`
-// GET	/api/v1/demo/dynamodb/conditional-writes`
-// GET	/api/v1/demo/dynamodb/transactions`
-// GET	/api/v1/operations/payments?state=PENDING_INVESTIGATION`
-// POST	/api/v1/operations/reconcile/{paymentId}`
-// GET	/api/v1/payments/{paymentId}/audit`
-// GET	/api/v1/payments/inbound/{paymentId}`
-// POST	/api/v1/payments/inbound/messages`
-// GET	/api/v1/payments/outbound/{paymentId}`
-// POST	/api/v1/payments/outbound`
-// POST	/api/v1/simulator/config`
-// POST	/api/v1/simulator/failures`

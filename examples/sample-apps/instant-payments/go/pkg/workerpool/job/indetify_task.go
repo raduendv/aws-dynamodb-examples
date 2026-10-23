@@ -2,95 +2,95 @@ package job
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
+	"instantpayments/pkg/model"
+
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types"
 	"go.uber.org/zap"
 )
 
-// IdentifyJob identifies a DynamoDB Stream record and dispatches a follow-up job.
+// IdentifyJob routes payment creation events and expired reservation timers.
 type IdentifyJob struct {
 	Record types.Record
+	Result chan error
 }
 
-// WorkerPool is the subset of worker-pool behavior required by jobs.
-type WorkerPool interface {
-	Dispatch(j Job)
+// Complete returns the processing result to the stream poller. Result must have
+// capacity for one acknowledgment so forced poller shutdown cannot block a worker.
+func (i *IdentifyJob) Complete(err error) {
+	if i.Result != nil {
+		i.Result <- err
+	}
 }
 
+// Run ignores unrelated records and routes creation or timer-removal events to
+// the payment service. Invalid keys, missing dependencies, and service failures
+// are returned to the poller for its bounded retry policy.
 func (i *IdentifyJob) Run(ctx context.Context) error {
-	logVal := ctx.Value(ContextKeyLogger{})
-	if logVal == nil {
-		return fmt.Errorf("logger context missing")
+	log, ok := ctx.Value(ContextKeyLogger{}).(*zap.Logger)
+	if !ok || log == nil {
+		return fmt.Errorf("logger context missing or invalid")
 	}
-	log, ok := logVal.(*zap.Logger)
-	if !ok {
-		return fmt.Errorf("logger context has wrong type")
-	}
-
-	workerPoolVal := ctx.Value(ContextKeyWorkerPool{})
-	if workerPoolVal == nil {
-		return fmt.Errorf("worker pool context missing")
-	}
-	workerPool, ok := workerPoolVal.(WorkerPool)
-	if !ok {
-		return fmt.Errorf("worker pool context has wrong type")
-	}
-	log.Info("IdentifyJob started")
-	if i.Record.EventName == types.OperationTypeRemove {
-		log.Info("ignoring removed stream record")
-
+	if i.Record.Dynamodb == nil {
 		return nil
 	}
 
-	log.Info("Record details", zap.Any("record", i.Record))
-
-	if pkVal := i.Record.Dynamodb.Keys["pk"]; pkVal != nil {
-		if pkAttr, ok := pkVal.(*types.AttributeValueMemberS); ok {
-			pk := pkAttr.Value
-			log.Info("Extracted pk", zap.String("pk", pk))
-			pkParts := strings.Split(pk, "#")
-
-			if len(pkParts) < 1 {
-				return errors.New("invalid pk format")
-			}
-
-			switch pkParts[0] {
-			case "ACCOUNT":
-				workerPool.Dispatch(&AccountJob{
-					Account: streamImage(i.Record),
-				})
-				log.Info("Identified record as ACCOUNT")
-			case "PAYMENT":
-				workerPool.Dispatch(&PaymentJob{
-					Record: streamImage(i.Record),
-				})
-				log.Info("Identified record as PAYMENT")
-			default:
-				log.Warn("Unknown record type", zap.String("pk_prefix", pkParts[0]))
-				return errors.New("unknown record type")
-			}
-
-		} else {
-			log.Warn("pk attribute is not of type AttributeValueMemberS")
+	keys := i.Record.Dynamodb.Keys
+	sk, _ := stringAttribute(keys["SK"])
+	if i.Record.EventName == types.OperationTypeRemove {
+		if !strings.HasPrefix(sk, model.ReservationTimerPrefix) {
+			return nil
 		}
-	} else {
-		log.Warn("pk attribute not found in record keys")
+		converted, err := attributevalue.FromDynamoDBStreamsMap(keys)
+		if err != nil {
+			return fmt.Errorf("convert reservation timer key: %w", err)
+		}
+		var timer model.ReservationTimerKeys
+		if err := attributevalue.UnmarshalMap(converted, &timer); err != nil {
+			return fmt.Errorf("decode reservation timer key: %w", err)
+		}
+		if timer.PK == "" || timer.SK == "" {
+			return fmt.Errorf("reservation timer key is incomplete")
+		}
+		processor, ok := ctx.Value(ContextKeyPaymentProcessor{}).(PaymentProcessor)
+		if !ok || processor == nil {
+			return fmt.Errorf("payment processor context missing or invalid")
+		}
+		return processor.ReleaseReservation(ctx, string(timer.PK), string(timer.SK))
 	}
 
-	log.Info("IdentifyJob done")
-
-	return nil
+	if i.Record.EventName != types.OperationTypeInsert {
+		return nil
+	}
+	image := i.Record.Dynamodb.NewImage
+	entityType, _ := stringAttribute(image["entityType"])
+	eventType, _ := stringAttribute(image["eventType"])
+	if entityType != "PAYMENT_EVENT" || eventType != "OUTBOUND_PAYMENT_CREATED" {
+		return nil
+	}
+	converted, err := attributevalue.FromDynamoDBStreamsMap(keys)
+	if err != nil {
+		return fmt.Errorf("convert payment event key: %w", err)
+	}
+	var event model.PaymentEventKeys
+	if err := attributevalue.UnmarshalMap(converted, &event); err != nil {
+		return fmt.Errorf("decode payment event key: %w", err)
+	}
+	paymentID, _ := stringAttribute(image["paymentId"])
+	if paymentID == "" || paymentID != string(event.PK) || event.SK <= 0 {
+		return fmt.Errorf("payment creation event has missing or inconsistent keys/paymentId")
+	}
+	return (&PaymentJob{PaymentID: paymentID}).Run(ctx)
 }
 
-func streamImage(record types.Record) map[string]types.AttributeValue {
-	if record.Dynamodb == nil {
-		return nil
+// stringAttribute extracts a nonempty string attribute without coercion.
+func stringAttribute(value types.AttributeValue) (string, bool) {
+	attribute, ok := value.(*types.AttributeValueMemberS)
+	if !ok || attribute.Value == "" {
+		return "", false
 	}
-	if len(record.Dynamodb.NewImage) > 0 {
-		return record.Dynamodb.NewImage
-	}
-	return record.Dynamodb.OldImage
+	return attribute.Value, true
 }

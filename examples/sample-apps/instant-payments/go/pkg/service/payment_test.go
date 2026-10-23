@@ -1,3 +1,5 @@
+// This suite covers in-memory payment validation, idempotency, settlement,
+// reservation release, tracking, and merchant pagination without DynamoDB.
 package service
 
 import (
@@ -10,10 +12,12 @@ import (
 	"instantpayments/pkg/dto"
 )
 
+// newTestPayment returns an isolated in-memory service with seeded demo accounts.
 func newTestPayment() *Payment {
 	return NewPayment(zap.NewNop(), nil)
 }
 
+// validInput returns a fresh valid USD request with the supplied idempotency key.
 func validInput(key string) *dto.OutboundPaymentInput {
 	return &dto.OutboundPaymentInput{
 		IdempotencyKey:  key,
@@ -26,6 +30,7 @@ func validInput(key string) *dto.OutboundPaymentInput {
 	}
 }
 
+// requireDomainError checks the status and code through any wrapping error.
 func requireDomainError(t *testing.T, err error, status int, code string) {
 	t.Helper()
 	var domain *DomainError
@@ -34,6 +39,23 @@ func requireDomainError(t *testing.T, err error, status int, code string) {
 	}
 	if domain.Status != status || domain.Code != code {
 		t.Fatalf("expected %d %s, got %d %s", status, code, domain.Status, domain.Code)
+	}
+}
+
+func TestDomainErrorExpectedOutcome(t *testing.T) {
+	for _, code := range []string{
+		"PAYMENT_NOT_FOUND", "ACCOUNT_NOT_FOUND", "INTERNAL_ERROR", "IDEMPOTENCY_CONFLICT", "VALIDATION_ERROR",
+	} {
+		t.Run(code, func(t *testing.T) {
+			want := code == "PAYMENT_NOT_FOUND" || code == "ACCOUNT_NOT_FOUND"
+			if got := (&DomainError{Code: code}).ExpectedOutcome(); got != want {
+				t.Fatalf("ExpectedOutcome() = %v, want %v", got, want)
+			}
+		})
+	}
+	var missing *DomainError
+	if missing.ExpectedOutcome() {
+		t.Fatal("nil domain error is not an expected outcome")
 	}
 }
 
@@ -75,11 +97,44 @@ func TestCreateIdempotencyAndConflict(t *testing.T) {
 	if created.PaymentID != replayed.PaymentID {
 		t.Fatalf("expected replay to preserve payment id, got %v and %v", created.PaymentID, replayed.PaymentID)
 	}
+	if created.CorrelationID == nil || replayed.CorrelationID == nil || *created.CorrelationID == "" || *created.CorrelationID != *replayed.CorrelationID {
+		t.Fatalf("expected replay to preserve correlation id, got %#v and %#v", created.CorrelationID, replayed.CorrelationID)
+	}
 
 	conflict := validInput("same-key")
 	conflict.Amount = 101
 	_, _, err = payment.Create(conflict)
 	requireDomainError(t, err, 409, "IDEMPOTENCY_CONFLICT")
+}
+
+func TestCreateReplayPreservesOriginalStateAfterProcessing(t *testing.T) {
+	payment := newTestPayment()
+	input := validInput("processed-replay")
+	created, _, err := payment.Create(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := payment.Process(created.PaymentID); err != nil {
+		t.Fatal(err)
+	}
+	replayed, status, err := payment.Create(input)
+	if err != nil || status != 200 || replayed.State != created.State || replayed.PaymentID != created.PaymentID ||
+		replayed.CreatedAtUTC != created.CreatedAtUTC || *replayed.CorrelationID != *created.CorrelationID {
+		t.Fatalf("expected original create snapshot, got %#v, %d, %v", replayed, status, err)
+	}
+}
+
+func TestRequestHashCountsUnicodeCharacters(t *testing.T) {
+	input := validInput("unicode-key")
+	input.CreditorName = "Jos\u00e9"
+	hash, err := requestHash(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expected = "f85cf0e4a6ca94968facd6cb7700c57be8117b6b52f4a9290ec0cd52a2f6275b"
+	if hash != expected {
+		t.Fatalf("expected canonical Unicode hash %s, got %s", expected, hash)
+	}
 }
 
 func TestProcessCompletedPaymentUpdatesAccountAndReservation(t *testing.T) {

@@ -14,6 +14,6 @@ func Module() fx.Option {
 		fx.Provide(DynamoDBStreams),
 		fx.Provide(NewRepository),
 		fx.Provide(func(repository *Repository) job.Repository { return repository }),
-		fx.Provide(NewStreamsWorker),
+		fx.Invoke(ConfigureStreams),
 	)
 }
